@@ -1,7 +1,7 @@
 [project]
 name = "ComfyUI-Simple-LlamaCPP-Client"
-description = "A lightweight custom node for **ComfyUI** that connects to a local **llama.cpp OpenAI-compatible server** with support for chat, vision, streaming, JSON mode, and clean answer/thinking separation."
-version = "1.0.0"
+description = "A ComfyUI custom node for llama.cpp router mode with support for chat, vision, audio, video, streaming, JSON mode, model management, and thinking/reasoning separation."
+version = "2.0.0"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 
@@ -15,5 +15,5 @@ Repository = "https://github.com/ai-joe-git/ComfyUI-Simple-LlamaCPP-Client"
 
 [tool.comfy]
 PublisherId = "ai-joe-git"
-DisplayName = "Simple LlamaCPP Client"
+DisplayName = "Llama.cpp Router Client"
 Icon = ""
