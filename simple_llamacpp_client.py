@@ -175,13 +175,13 @@ def _parse_stream_and_accumulate(resp, tick=None) -> Tuple[str, str, Dict[str, A
         if not choices:
             continue
         delta = choices[0].get("delta", {})
-        full_content += delta.get("content", "")
-        full_reasoning += delta.get("reasoning_content", "") or delta.get("reasoning", "") or delta.get("thoughts", "")
+        full_content += (delta.get("content") or "")
+        full_reasoning += (delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thoughts") or "")
 
         message = choices[0].get("message", {})
         if message:
-            full_content += message.get("content", "")
-            full_reasoning += message.get("reasoning_content", "") or message.get("reasoning", "") or message.get("thoughts", "")
+            full_content += (message.get("content") or "")
+            full_reasoning += (message.get("reasoning_content") or message.get("reasoning") or message.get("thoughts") or "")
 
         if not meta and chunk.get("id"):
             meta["id"] = chunk["id"]
@@ -425,11 +425,12 @@ class LlamaCppRouterClient:
                 raw_json = json.dumps(resp_json, ensure_ascii=False)
                 choice = (resp_json.get("choices") or [{}])[0]
                 message = choice.get("message", {})
-                full_content = message.get("content", "") or choice.get("text", "")
+                full_content = (message.get("content") or choice.get("text") or "")
                 full_reasoning = (
-                    message.get("reasoning_content", "")
-                    or message.get("reasoning", "")
-                    or message.get("thoughts", "")
+                    message.get("reasoning_content")
+                    or message.get("reasoning")
+                    or message.get("thoughts")
+                    or ""
                 )
                 if not full_reasoning and full_content:
                     clean, thinking = _extract_thinking(full_content)
