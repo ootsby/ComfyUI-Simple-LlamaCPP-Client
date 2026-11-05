@@ -1,8 +1,10 @@
 import base64
+import contextvars
 import io
 import json
 import os
 import re
+import threading
 from typing import Any, Dict, Optional, Tuple, List
 
 import requests
@@ -15,6 +17,7 @@ except Exception:
 
 try:
     import comfy.utils
+    import comfy.model_management
 except Exception:
     comfy = None
 
@@ -145,6 +148,31 @@ def _make_progress():
         return None
 
 
+def _run_interruptible(fn, cancel):
+    """Run fn in a worker thread so a ComfyUI cancel is honoured immediately instead of after the HTTP call returns."""
+    if comfy is None:
+        return fn()
+    result = {}
+
+    def worker():
+        try:
+            result["value"] = fn()
+        except BaseException as e:
+            result["error"] = e
+
+    # copy_context so ProgressBar ticks in the worker still know which node is executing
+    t = threading.Thread(target=contextvars.copy_context().run, args=(worker,), daemon=True)
+    t.start()
+    while t.is_alive():
+        t.join(0.1)
+        if comfy.model_management.processing_interrupted():
+            cancel.set()
+            comfy.model_management.throw_exception_if_processing_interrupted()
+    if "error" in result:
+        raise result["error"]
+    return result["value"]
+
+
 def _iter_sse_lines(resp):
     for raw in resp.iter_lines(decode_unicode=True):
         if raw is None:
@@ -155,12 +183,14 @@ def _iter_sse_lines(resp):
         yield line
 
 
-def _parse_stream_and_accumulate(resp, tick=None) -> Tuple[str, str, Dict[str, Any]]:
+def _parse_stream_and_accumulate(resp, tick=None, cancel=None) -> Tuple[str, str, Dict[str, Any]]:
     full_content = ""
     full_reasoning = ""
     meta = {}
 
     for line in _iter_sse_lines(resp):
+        if cancel is not None and cancel.is_set():
+            break
         if tick:
             tick()
         if not line.startswith("data:"):
@@ -395,31 +425,37 @@ class LlamaCppRouterClient:
             payload["response_format"] = {"type": "json_object"}
 
         tick = _make_progress() if stream else None
+        cancel = threading.Event()
 
         try:
             if stream:
                 payload["stream"] = True
-                r = requests.post(
-                    f"{base_url}/v1/chat/completions",
-                    json=payload,
-                    headers=headers,
-                    timeout=300,
-                    stream=True,
-                )
-                r.raise_for_status()
-                full_content, full_reasoning, meta = _parse_stream_and_accumulate(r, tick)
+
+                def _stream():
+                    # closing the response on cancel drops the connection, which makes llama.cpp stop generating
+                    with requests.post(
+                        f"{base_url}/v1/chat/completions",
+                        json=payload,
+                        headers=headers,
+                        timeout=300,
+                        stream=True,
+                    ) as r:
+                        r.raise_for_status()
+                        return _parse_stream_and_accumulate(r, tick, cancel)
+
+                full_content, full_reasoning, meta = _run_interruptible(_stream, cancel)
                 raw_json = json.dumps({
                     "content": full_content,
                     "reasoning": full_reasoning,
                     "meta": meta,
                 }, ensure_ascii=False)
             else:
-                r = requests.post(
+                r = _run_interruptible(lambda: requests.post(
                     f"{base_url}/v1/chat/completions",
                     json=payload,
                     headers=headers,
                     timeout=300,
-                )
+                ), cancel)
                 r.raise_for_status()
                 resp_json = r.json()
                 raw_json = json.dumps(resp_json, ensure_ascii=False)
